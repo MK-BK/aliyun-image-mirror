@@ -6,6 +6,13 @@ on:
       - main
     paths:
       - 'images.txt'
+  workflow_dispatch:
+    inputs:
+      force_sync:
+        description: '强制全量同步 images.txt 中所有镜像（忽略 diff）'
+        required: false
+        type: boolean
+        default: false
 
 # 同一分支的多次推送按顺序执行，避免并发冲突
 concurrency:
@@ -21,15 +28,20 @@ jobs:
         with:
           fetch-depth: 0  # 完整历史，用于计算 diff
 
-      - name: Get newly added images
+      - name: Get images to mirror
         id: diff
         env:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.after }}
+          FORCE_SYNC: ${{ inputs.force_sync || github.event.inputs.force_sync || 'false' }}
         run: |
           set -uo pipefail
 
-          if [ "${BEFORE}" = "0000000000000000000000000000000000000000" ]; then
+          if [ "${FORCE_SYNC}" = "true" ]; then
+            # 手动触发 — 全量同步文件中所有镜像
+            echo "Force sync: processing ALL images in images.txt"
+            ADDED=$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' images.txt | sort -u)
+          elif [ "${BEFORE}" = "0000000000000000000000000000000000000000" ]; then
             # 首次推送到分支 — 文件中所有镜像都视为新增
             ADDED=$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' images.txt | sort -u)
           else
@@ -45,7 +57,7 @@ jobs:
           fi
 
           if [ -z "${ADDED}" ]; then
-            echo "No new images to mirror."
+            echo "No images to mirror."
             echo "has_images=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_images=true" >> "$GITHUB_OUTPUT"
@@ -55,18 +67,25 @@ jobs:
               echo "images_end"
             } >> "$GITHUB_OUTPUT"
             COUNT=$(echo "${ADDED}" | wc -l)
-            echo "Found ${COUNT} new image(s) to mirror."
+            echo "Found ${COUNT} image(s) to mirror."
           fi
+
+      - name: Install skopeo
+        if: steps.diff.outputs.has_images == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
 
       - name: Login to Aliyun ACR
         if: steps.diff.outputs.has_images == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.ALIYUN_REGISTRY }}
-          username: ${{ secrets.ALIYUN_USERNAME }}
-          password: ${{ secrets.ALIYUN_PASSWORD }}
+        env:
+          ALIYUN_REGISTRY: ${{ secrets.ALIYUN_REGISTRY }}
+          ALIYUN_USERNAME: ${{ secrets.ALIYUN_USERNAME }}
+          ALIYUN_PASSWORD: ${{ secrets.ALIYUN_PASSWORD }}
+        run: |
+          skopeo login "${ALIYUN_REGISTRY}" \
+            -u "${ALIYUN_USERNAME}" \
+            --passwd-stdin <<< "${ALIYUN_PASSWORD}"
 
-      - name: Pull, tag and push images
+      - name: Copy images with skopeo
         if: steps.diff.outputs.has_images == 'true'
         env:
           IMAGES: ${{ steps.diff.outputs.images }}
@@ -83,25 +102,19 @@ jobs:
             echo "::group::Mirror: ${image}"
             target="${ALIYUN_REGISTRY}/${image}"
 
-            echo "  pull  -> ${image}"
-            if docker pull "${image}"; then
-              echo "  tag   -> ${target}"
-              docker tag "${image}" "${target}"
-              echo "  push  -> ${target}"
-              if docker push "${target}"; then
-                echo "OK: ${image}"
-                SUCCESS=$((SUCCESS + 1))
-              else
-                echo "FAIL: push failed -> ${target}"
-                FAILED=$((FAILED + 1))
-              fi
+            echo "  copy -> ${target} (all architectures)"
+
+            if skopeo copy \
+              --multi-arch system \
+              "docker://${image}" \
+              "docker://${target}"; then
+              echo "OK: ${image}"
+              SUCCESS=$((SUCCESS + 1))
             else
-              echo "FAIL: pull failed -> ${image}"
+              echo "FAIL: ${image}"
               FAILED=$((FAILED + 1))
             fi
 
-            # 清理本地镜像，节省磁盘空间
-            docker rmi "${image}" "${target}" 2>/dev/null || true
             echo "::endgroup::"
           done <<< "${IMAGES}"
 
