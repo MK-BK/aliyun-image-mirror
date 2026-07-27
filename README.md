@@ -68,11 +68,99 @@ Workflow 使用 `git diff` 计算提交前后的差异：
 ```
 .
 ├── images.txt                    # 镜像列表文件
+├── scripts/
+│   └── sync-to-local.sh          # 从阿里云 ACR 同步到本地私有仓库的脚本
 ├── .github/
 │   └── workflows/
 │       └── mirror.yml            # GitHub Actions 工作流
 ├── .gitignore
 └── README.md
+```
+
+## 从阿里云同步到本地私有仓库
+
+`scripts/sync-to-local.sh` 脚本用于将阿里云 ACR 中的镜像同步到本地私有镜像仓库（如 Harbor、Nexus、自建 Docker Registry 等）。
+
+### 依赖
+
+需要安装 `skopeo`：
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install -y skopeo
+
+# CentOS/RHEL
+sudo dnf install -y skopeo
+
+# macOS
+brew install skopeo
+```
+
+### 使用方式
+
+**方式一：使用环境变量**
+
+```bash
+export ALIYUN_REGISTRY="crpi-xxx.cn-hangzhou.personal.cr.aliyuncs.com/ns"
+export ALIYUN_USERNAME="your-username"
+export ALIYUN_PASSWORD="your-password"
+export LOCAL_REGISTRY="192.168.1.100:5000"
+# 如果本地仓库需要认证：
+# export LOCAL_USERNAME="admin"
+# export LOCAL_PASSWORD="Harbor12345"
+
+./scripts/sync-to-local.sh
+```
+
+**方式二：使用命令行参数**
+
+```bash
+./scripts/sync-to-local.sh \
+  -s crpi-xxx.cn-hangzhou.personal.cr.aliyuncs.com/ns \
+  -u your-username -p your-password \
+  -d 192.168.1.100:5000
+```
+
+**方式三：预览（不实际同步）**
+
+```bash
+./scripts/sync-to-local.sh --dry-run \
+  -s crpi-xxx.cn-hangzhou.personal.cr.aliyuncs.com/ns \
+  -d 192.168.1.100:5000
+```
+
+### 参数说明
+
+| 参数 | 环境变量 | 说明 | 默认值 |
+|------|----------|------|--------|
+| `-s` | `ALIYUN_REGISTRY` | 阿里云 ACR 地址（含命名空间） | - |
+| `-u` | `ALIYUN_USERNAME` | ACR 用户名 | - |
+| `-p` | `ALIYUN_PASSWORD` | ACR 密码 | - |
+| `-d` | `LOCAL_REGISTRY` | 本地仓库地址 | - |
+| - | `LOCAL_USERNAME` | 本地仓库用户名（可选） | - |
+| - | `LOCAL_PASSWORD` | 本地仓库密码（可选） | - |
+| `-f` | - | 镜像列表文件 | `images.txt` |
+| - | `SRC_TLS_VERIFY` | 源仓库 TLS 校验 | `true` |
+| - | `DST_TLS_VERIFY` | 目标仓库 TLS 校验 | `false` |
+| - | `MULTI_ARCH` | 多架构模式 | `system` |
+| `--dry-run` | - | 仅预览不执行 | `false` |
+
+### 镜像命名规则
+
+与 GitHub Workflow 一致，取镜像名的最后一段作为仓库名：
+
+| `images.txt` 中的镜像 | 阿里云 ACR 中的镜像 | 本地仓库中的镜像 |
+|---|---|---|
+| `lmsysorg/sglang:v0.5.16` | `crpi-xxx/ns/sglang:v0.5.16` | `192.168.1.100:5000/sglang:v0.5.16` |
+| `vllm/vllm-openai:v0.26.0` | `crpi-xxx/ns/vllm-openai:v0.26.0` | `192.168.1.100:5000/vllm-openai:v0.26.0` |
+| `nginx:latest` | `crpi-xxx/ns/nginx:latest` | `192.168.1.100:5000/nginx:latest` |
+
+### TLS 说明
+
+本地私有仓库通常使用 HTTP 或自签名证书，脚本默认对目标仓库关闭 TLS 校验（`DST_TLS_VERIFY=false`）。如果你的本地仓库使用了正规证书，可以开启：
+
+```bash
+export DST_TLS_VERIFY=true
 ```
 
 ## 注意事项

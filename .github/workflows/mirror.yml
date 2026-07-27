@@ -110,6 +110,7 @@ jobs:
 
             if skopeo copy \
               --multi-arch system \
+              --progress \
               "docker://${image}" \
               "docker://${target}"; then
               echo "OK: ${image}"
