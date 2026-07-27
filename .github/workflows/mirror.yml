@@ -81,9 +81,9 @@ jobs:
           ALIYUN_USERNAME: ${{ secrets.ALIYUN_USERNAME }}
           ALIYUN_PASSWORD: ${{ secrets.ALIYUN_PASSWORD }}
         run: |
-          skopeo login "${ALIYUN_REGISTRY}" \
+          echo "${ALIYUN_PASSWORD}" | skopeo login "${ALIYUN_REGISTRY}" \
             -u "${ALIYUN_USERNAME}" \
-            --passwd-stdin <<< "${ALIYUN_PASSWORD}"
+            --password-stdin
 
       - name: Copy images with skopeo
         if: steps.diff.outputs.has_images == 'true'
