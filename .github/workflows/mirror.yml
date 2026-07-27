@@ -86,6 +86,7 @@ jobs:
             --password-stdin
 
       - name: Copy images with skopeo
+        id: copy
         if: steps.diff.outputs.has_images == 'true'
         env:
           IMAGES: ${{ steps.diff.outputs.images }}
@@ -95,12 +96,15 @@ jobs:
 
           SUCCESS=0
           FAILED=0
+          FAILED_IMAGES=""
 
           while IFS= read -r image; do
             [ -z "$image" ] && continue
 
             echo "::group::Mirror: ${image}"
-            target="${ALIYUN_REGISTRY}/${image}"
+            # 取最后一段作为仓库名，如 lmsysorg/sglang:v0.5.16 -> sglang:v0.5.16
+            short_name="${image##*/}"
+            target="${ALIYUN_REGISTRY}/${short_name}"
 
             echo "  copy -> ${target} (all architectures)"
 
@@ -113,10 +117,20 @@ jobs:
             else
               echo "FAIL: ${image}"
               FAILED=$((FAILED + 1))
+              FAILED_IMAGES="${FAILED_IMAGES}${image}"$'\n'
             fi
 
             echo "::endgroup::"
           done <<< "${IMAGES}"
+
+          # 输出结果供后续步骤使用
+          echo "success=${SUCCESS}" >> "$GITHUB_OUTPUT"
+          echo "failed=${FAILED}" >> "$GITHUB_OUTPUT"
+          {
+            echo "failed_images<<EOF"
+            echo "${FAILED_IMAGES}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
           {
             echo "## Mirror Summary"
@@ -130,3 +144,84 @@ jobs:
           if [ "${FAILED}" -gt 0 ]; then
             exit 1
           fi
+
+      - name: Notify DingTalk
+        if: always() && steps.diff.outputs.has_images == 'true'
+        env:
+          DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+          SUCCESS: ${{ steps.copy.outputs.success }}
+          FAILED: ${{ steps.copy.outputs.failed }}
+          FAILED_IMAGES: ${{ steps.copy.outputs.failed_images }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FORCE_SYNC: ${{ inputs.force_sync || github.event.inputs.force_sync || 'false' }}
+        run: |
+          set -uo pipefail
+
+          # 未配置钉钉 webhook 则跳过
+          if [ -z "${DINGTALK_WEBHOOK}" ]; then
+            echo "DINGTALK_WEBHOOK not set, skipping notification."
+            exit 0
+          fi
+
+          # 计算加签（如果配置了密钥）
+          WEBHOOK="${DINGTALK_WEBHOOK}"
+          if [ -n "${DINGTALK_SECRET}" ]; then
+            timestamp=$(date +%s%3N)
+            string_to_sign="${timestamp}\n${DINGTALK_SECRET}"
+            sign=$(printf '%b' "${string_to_sign}" \
+              | openssl dgst -sha256 -hmac "${DINGTALK_SECRET}" -binary \
+              | base64)
+            sign_encoded=$(python3 -c \
+              "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "${sign}")
+            WEBHOOK="${DINGTALK_WEBHOOK}&timestamp=${timestamp}&sign=${sign_encoded}"
+          fi
+
+          # 判断状态
+          if [ "${FAILED}" -gt 0 ] && [ "${SUCCESS}" -gt 0 ]; then
+            TITLE="❌ 镜像同步部分失败"
+            STATUS="❌ 部分失败"
+          elif [ "${FAILED}" -gt 0 ]; then
+            TITLE="❌ 镜像同步失败"
+            STATUS="❌ 全部失败"
+          else
+            TITLE="✅ 镜像同步完成"
+            STATUS="✅ 全部成功"
+          fi
+
+          # 触发方式
+          if [ "${FORCE_SYNC}" = "true" ]; then
+            TRIGGER="手动触发（强制全量同步）"
+          else
+            TRIGGER="推送 images.txt"
+          fi
+
+          # 构造 markdown 消息
+          NL=$'\n'
+          TEXT="## ${TITLE}${NL}"
+          TEXT+="${NL}**状态：** ${STATUS}${NL}"
+          TEXT+="${NL}**触发方式：** ${TRIGGER}${NL}"
+          TEXT+="${NL}**成功：** ${SUCCESS}${NL}"
+          TEXT+="${NL}**失败：** ${FAILED}${NL}"
+
+          if [ -n "${FAILED_IMAGES}" ]; then
+            TEXT+="${NL}**失败镜像：**${NL}"
+            while IFS= read -r img; do
+              [ -z "$img" ] && continue
+              TEXT+="- ${img}${NL}"
+            done <<< "${FAILED_IMAGES}"
+          fi
+
+          TEXT+="${NL}[查看详情](${RUN_URL})"
+
+          # 发送钉钉消息
+          PAYLOAD=$(jq -n \
+            --arg title "${TITLE}" \
+            --arg text "${TEXT}" \
+            '{msgtype:"markdown", markdown:{title:$title, text:$text}}')
+
+          RESPONSE=$(curl -s -X POST "${WEBHOOK}" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}")
+
+          echo "DingTalk response: ${RESPONSE}"
