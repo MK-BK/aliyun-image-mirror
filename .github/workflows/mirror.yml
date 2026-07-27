@@ -1,0 +1,119 @@
+name: Mirror Images to Aliyun ACR
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'images.txt'
+
+# 同一分支的多次推送按顺序执行，避免并发冲突
+concurrency:
+  group: mirror-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 完整历史，用于计算 diff
+
+      - name: Get newly added images
+        id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          set -uo pipefail
+
+          if [ "${BEFORE}" = "0000000000000000000000000000000000000000" ]; then
+            # 首次推送到分支 — 文件中所有镜像都视为新增
+            ADDED=$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' images.txt | sort -u)
+          else
+            # 仅取新增行（以 + 开头），忽略删除行（以 - 开头）
+            ADDED=$(git diff "${BEFORE}" "${AFTER}" -- images.txt \
+              | grep '^+' \
+              | grep -v '^+++' \
+              | sed 's/^+//' \
+              | sed '/^[[:space:]]*#/d' \
+              | sed '/^[[:space:]]*$/d' \
+              | sort -u \
+              || true)
+          fi
+
+          if [ -z "${ADDED}" ]; then
+            echo "No new images to mirror."
+            echo "has_images=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_images=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "images<<images_end"
+              echo "${ADDED}"
+              echo "images_end"
+            } >> "$GITHUB_OUTPUT"
+            COUNT=$(echo "${ADDED}" | wc -l)
+            echo "Found ${COUNT} new image(s) to mirror."
+          fi
+
+      - name: Login to Aliyun ACR
+        if: steps.diff.outputs.has_images == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ALIYUN_REGISTRY }}
+          username: ${{ secrets.ALIYUN_USERNAME }}
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+
+      - name: Pull, tag and push images
+        if: steps.diff.outputs.has_images == 'true'
+        env:
+          IMAGES: ${{ steps.diff.outputs.images }}
+          ALIYUN_REGISTRY: ${{ secrets.ALIYUN_REGISTRY }}
+        run: |
+          set -uo pipefail
+
+          SUCCESS=0
+          FAILED=0
+
+          while IFS= read -r image; do
+            [ -z "$image" ] && continue
+
+            echo "::group::Mirror: ${image}"
+            target="${ALIYUN_REGISTRY}/${image}"
+
+            echo "  pull  -> ${image}"
+            if docker pull "${image}"; then
+              echo "  tag   -> ${target}"
+              docker tag "${image}" "${target}"
+              echo "  push  -> ${target}"
+              if docker push "${target}"; then
+                echo "OK: ${image}"
+                SUCCESS=$((SUCCESS + 1))
+              else
+                echo "FAIL: push failed -> ${target}"
+                FAILED=$((FAILED + 1))
+              fi
+            else
+              echo "FAIL: pull failed -> ${image}"
+              FAILED=$((FAILED + 1))
+            fi
+
+            # 清理本地镜像，节省磁盘空间
+            docker rmi "${image}" "${target}" 2>/dev/null || true
+            echo "::endgroup::"
+          done <<< "${IMAGES}"
+
+          {
+            echo "## Mirror Summary"
+            echo ""
+            echo "| Status | Count |"
+            echo "|--------|-------|"
+            echo "| Success | ${SUCCESS} |"
+            echo "| Failed  | ${FAILED} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${FAILED}" -gt 0 ]; then
+            exit 1
+          fi
