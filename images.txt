@@ -9,4 +9,5 @@
 # lmsysorg/sglang:v0.5.16
 # vllm/vllm-openai:v0.26.0
 # vllm/vllm-openai:v0.26.0-cu129
-vllm/vllm-openai:nightly-49f31d7cee425a6d38f8c5bc76877986daf832ed
+# vllm/vllm-openai:nightly-49f31d7cee425a6d38f8c5bc76877986daf832ed
+vllm/vllm-openai:nightly
