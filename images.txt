@@ -12,5 +12,6 @@
 # vllm/vllm-openai:nightly-49f31d7cee425a6d38f8c5bc76877986daf832ed
 # vllm/vllm-openai:nightly
 # lmsysorg/sglang:v0.5.17-cu130
-vllm/vllm-openai:v0.27.0
-vllm/vllm-openai:v0.27.1
+# vllm/vllm-openai:v0.27.0
+# vllm/vllm-openai:v0.27.1
+redroid/redroid:16.0.0-latest
