@@ -109,7 +109,7 @@ jobs:
             echo "  copy -> ${target} (all architectures)"
 
             if skopeo copy \
-              --multi-arch system \
+              --all \
               "docker://${image}" \
               "docker://${target}"; then
               echo "OK: ${image}"

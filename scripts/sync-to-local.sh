@@ -70,10 +70,10 @@ if ! command -v skopeo &>/dev/null; then
     exit 1
 fi
 
-# 检测是否支持 --multi-arch 参数
+# 检测是否支持 --all 参数
 MULTI_ARCH_FLAG=""
-if skopeo copy --help 2>&1 | grep -q -- '--multi-arch'; then
-    MULTI_ARCH_FLAG="--multi-arch system"
+if skopeo copy --help 2>&1 | grep -q -- '--all'; then
+    MULTI_ARCH_FLAG="--all"
 fi
 
 # ── 读取镜像列表 ──────────────────────────────────────────────
