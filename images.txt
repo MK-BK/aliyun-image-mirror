@@ -14,4 +14,5 @@
 # lmsysorg/sglang:v0.5.17-cu130
 # vllm/vllm-openai:v0.27.0
 # vllm/vllm-openai:v0.27.1
-redroid/redroid:16.0.0-latest
+# redroid/redroid:16.0.0-latest
+lmsysorg/sglang:v0.5.18-cu130
