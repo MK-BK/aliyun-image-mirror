@@ -144,6 +144,11 @@ jobs:
               if echo "${ENTRIES}" | grep -qx 'UNSAFE'; then
                 echo "  manifest list contains entries without platform info, cannot strip attestations safely"
               else
+                # Docker 引用不能同时带 tag 和 digest，源引用只保留 repo（去掉 :tag）
+                src_repo="${image}"
+                if [[ "${image##*/}" == *":"* && "${image##*/}" != *"@"* ]]; then
+                  src_repo="${image%:*}"
+                fi
                 CREATE_ARGS=()
                 arch_ok=true
                 while IFS= read -r entry; do
@@ -156,7 +161,7 @@ jobs:
                   [ -n "$variant" ] && tmp_tag="${tmp_tag}_${variant}"
 
                   echo "  copy ${os}/${arch}${variant:+/$variant} -> ${dst_repo}:${tmp_tag}"
-                  if ! skopeo copy "docker://${image}@${digest}" "docker://${dst_repo}:${tmp_tag}"; then
+                  if ! skopeo copy "docker://${src_repo}@${digest}" "docker://${dst_repo}:${tmp_tag}"; then
                     arch_ok=false
                     break
                   fi
