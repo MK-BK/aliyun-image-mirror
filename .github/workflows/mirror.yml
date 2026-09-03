@@ -91,7 +91,8 @@ jobs:
           echo "${ALIYUN_PASSWORD}" | skopeo login "${ALIYUN_REGISTRY}" \
             -u "${ALIYUN_USERNAME}" \
             --password-stdin
-          echo "${ALIYUN_PASSWORD}" | crane auth login "${ALIYUN_REGISTRY}" \
+          # crane 只接受 host[:port] 形式，ALIYUN_REGISTRY 含命名空间路径，需截取 host
+          echo "${ALIYUN_PASSWORD}" | crane auth login "${ALIYUN_REGISTRY%%/*}" \
             -u "${ALIYUN_USERNAME}" \
             --password-stdin
 
