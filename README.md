@@ -169,3 +169,4 @@ export DST_TLS_VERIFY=true
 - Docker Hub 有拉取频率限制，大量同步时建议配置 Docker Hub 凭据
 - Workflow 使用 `concurrency` 确保同分支推送按顺序执行
 - 同一镜像重复添加不会重复同步（diff 只检测实际新增行）
+- 同步时会自动剔除 manifest list 中的 attestation 清单（buildx 生成镜像时附带的 provenance/SBOM 元数据，platform 为 `unknown/unknown`）：阿里云 ACR 不支持其 manifest 类型（`application/vnd.oci.empty.v1+json`），剔除后不影响镜像的拉取和运行，仅丢失构建溯源信息

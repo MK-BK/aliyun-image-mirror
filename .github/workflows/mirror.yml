@@ -70,9 +70,16 @@ jobs:
             echo "Found ${COUNT} image(s) to mirror."
           fi
 
-      - name: Install skopeo
+      - name: Install skopeo and crane
         if: steps.diff.outputs.has_images == 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
+        env:
+          CRANE_VERSION: v0.22.0
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
+          # crane: 剔除 manifest list 中的 attestation 清单（阿里云 ACR 不支持该类型）
+          curl -sfL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin crane
+          crane version
 
       - name: Login to Aliyun ACR
         if: steps.diff.outputs.has_images == 'true'
@@ -82,6 +89,9 @@ jobs:
           ALIYUN_PASSWORD: ${{ secrets.ALIYUN_PASSWORD }}
         run: |
           echo "${ALIYUN_PASSWORD}" | skopeo login "${ALIYUN_REGISTRY}" \
+            -u "${ALIYUN_USERNAME}" \
+            --password-stdin
+          echo "${ALIYUN_PASSWORD}" | crane auth login "${ALIYUN_REGISTRY}" \
             -u "${ALIYUN_USERNAME}" \
             --password-stdin
 
@@ -106,12 +116,56 @@ jobs:
             short_name="${image##*/}"
             target="${ALIYUN_REGISTRY}/${short_name}"
 
-            echo "  copy -> ${target} (all architectures)"
+            # 读取源镜像原始 manifest，检测 manifest list 是否包含 attestation 清单
+            # （buildx 生成的 provenance/SBOM，platform 为 unknown/unknown，
+            #   config 为 application/vnd.oci.empty.v1+json，阿里云 ACR 会拒绝接收）
+            RAW=$(skopeo inspect --raw "docker://${image}" 2>/dev/null || true)
+            HAS_ATTESTATION=false
+            if [ -n "${RAW}" ] && echo "${RAW}" | jq -e 'has("manifests")' >/dev/null 2>&1; then
+              ATT=$(echo "${RAW}" | jq '[.manifests[] | select(
+                ((.platform.os? // "") == "unknown" and (.platform.architecture? // "") == "unknown")
+                or ((.annotations?["vnd.docker.reference.type"] // "") == "attestation-manifest")
+              )] | length')
+              [ "${ATT:-0}" -gt 0 ] && HAS_ATTESTATION=true
+            fi
 
-            if skopeo copy \
-              --all \
-              "docker://${image}" \
-              "docker://${target}"; then
+            copy_ok=false
+
+            if [ "${HAS_ATTESTATION}" = "true" ]; then
+              # 剔除 attestation 清单：按剩余真实平台列表重建 manifest list
+              PLATFORMS=$(echo "${RAW}" | jq -r '
+                [.manifests[] | select(
+                  (((.platform.os? // "") == "unknown" and (.platform.architecture? // "") == "unknown")
+                  or ((.annotations?["vnd.docker.reference.type"] // "") == "attestation-manifest"))
+                  | not)]
+                | if any(.platform == null) then
+                    "UNSAFE"
+                  else
+                    (map(.platform | "\(.os)/\(.architecture)\(if .variant then "/" + .variant else "" end)") | unique | .[])
+                  end')
+
+              if echo "${PLATFORMS}" | grep -qx 'UNSAFE'; then
+                echo "  manifest list contains entries without platform info, cannot strip attestations safely"
+              else
+                PLATFORM_ARGS=()
+                while IFS= read -r p; do
+                  [ -n "$p" ] && PLATFORM_ARGS+=("--platform" "$p")
+                done <<< "${PLATFORMS}"
+
+                if [ "${#PLATFORM_ARGS[@]}" -gt 0 ]; then
+                  echo "  copy -> ${target} (attestations stripped, platforms: $(echo "${PLATFORMS}" | tr '\n' ' '))"
+                  crane index filter "${image}" "${PLATFORM_ARGS[@]}" -t "${target}" && copy_ok=true
+                fi
+              fi
+            else
+              echo "  copy -> ${target} (all architectures)"
+              skopeo copy \
+                --all \
+                "docker://${image}" \
+                "docker://${target}" && copy_ok=true
+            fi
+
+            if [ "${copy_ok}" = "true" ]; then
               echo "OK: ${image}"
               SUCCESS=$((SUCCESS + 1))
             else
