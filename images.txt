@@ -18,4 +18,5 @@
 # lmsysorg/sglang:v0.5.18-cu130
 # lmsysorg/sglang:glm-5.3-flash
 # lmsysorg/sglang:dev-cu12
-lightx2v/lightx2v:26062001-cu130
+# lightx2v/lightx2v:26062001-cu130
+vllm/vllm-omni:minimax-h3
