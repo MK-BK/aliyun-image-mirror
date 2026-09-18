@@ -21,4 +21,5 @@
 # lightx2v/lightx2v:26062001-cu130
 # vllm/vllm-omni:minimax-h3
 # lmsysorg/sglang:dev-dsv41
-vllm/vllm-openai:deepseekv41-flash-0909
+# vllm/vllm-openai:deepseekv41-flash-0909
+vllm/vllm-openai:nightly
