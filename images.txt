@@ -22,4 +22,6 @@
 # vllm/vllm-omni:minimax-h3
 # lmsysorg/sglang:dev-dsv41
 # vllm/vllm-openai:deepseekv41-flash-0909
-vllm/vllm-openai:nightly
+# vllm/vllm-openai:nightly
+lmsysorg/sglang:v0.5.21
+vllm/vllm-openai:v0.31.0
