@@ -74,6 +74,21 @@ jobs:
         if: steps.diff.outputs.has_images == 'true'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
 
+      - name: Login to Docker Hub
+        # 匿名拉取会与共享 runner IP 的限流配额挤在一起，容易被 CDN 掐断连接
+        if: steps.diff.outputs.has_images == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "${DOCKERHUB_USERNAME}" ] || [ -z "${DOCKERHUB_TOKEN}" ]; then
+            echo "Docker Hub credentials not set, pulling anonymously."
+            exit 0
+          fi
+          echo "${DOCKERHUB_TOKEN}" | skopeo login docker.io \
+            -u "${DOCKERHUB_USERNAME}" \
+            --password-stdin
+
       - name: Login to Aliyun ACR
         if: steps.diff.outputs.has_images == 'true'
         env:
