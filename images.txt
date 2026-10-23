@@ -28,4 +28,6 @@
 # lmsysorg/sglang:nightly-dev-cu13-20261008-7760d526
 # vllm/vllm-openai:nightly
 # vllm/vllm-openai:v0.32.0
-lmsysorg/sglang:v0.5.22
+# lmsysorg/sglang:v0.5.22
+vllm/vllm-openai:minimax-m31-flash
+lmsysorg/sglang:dev-minimax-m31-flash-mi35x
