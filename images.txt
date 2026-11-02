@@ -32,4 +32,7 @@
 # vllm/vllm-openai:minimax-m31-flash
 # lmsysorg/sglang:dev-minimax-m31-flash-mi35x
 # vllm/vllm-openai:cu134-nightly-3966924d566340e971a6da313e790d05492aa505
-vllm/vllm-openai:cu134-nightly-335dd77b09161c5d63139b4e7ae51bb9928305b1
+# vllm/vllm-openai:cu134-nightly-335dd77b09161c5d63139b4e7ae51bb9928305b1
+
+lmsysorg/sglang:v0.5.23-cu130
+vllm/vllm-openai:v0.33.0
